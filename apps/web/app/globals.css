@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: 12 14 19;
+  --mist: 236 239 244;
+  --sky: 120 170 255;
+  --leaf: 88 190 140;
+  --ember: 243 151 74;
+}
+
+body {
+  color: rgb(var(--ink));
+  background: radial-gradient(1200px 600px at 15% -10%, rgba(120, 170, 255, 0.28), transparent 60%),
+    radial-gradient(800px 500px at 90% 0%, rgba(88, 190, 140, 0.25), transparent 60%),
+    linear-gradient(180deg, #f7f7f2 0%, #f0f2f7 60%, #eef3f9 100%);
+  min-height: 100vh;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    box-shadow: 0 20px 60px rgba(17, 24, 39, 0.12);
+    backdrop-filter: blur(10px);
+  }
+
+  .grid-dots {
+    background-image: radial-gradient(rgba(15, 23, 42, 0.08) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  .soft-ring {
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08), 0 12px 30px rgba(15, 23, 42, 0.14);
+  }
+}
+
+@keyframes floatA {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+@keyframes floatB {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(10px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.float-a {
+  animation: floatA 7s ease-in-out infinite;
+}
+
+.float-b {
+  animation: floatB 9s ease-in-out infinite;
+}
