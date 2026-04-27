@@ -29,17 +29,30 @@ export default function VolunteersPage() {
     void loadVolunteers();
   }, []);
 
+  function normalizeEmail(value: FormDataEntryValue | null) {
+    return String(value || "").trim().toLowerCase();
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
 
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const email = normalizeEmail(form.get("email"));
+
+    if (email && volunteers.some((volunteer) => (volunteer.email || "").toLowerCase() === email)) {
+      setError(`A volunteer with email ${email} already exists.`);
+      setSaving(false);
+      return;
+    }
+
     try {
       await apiPost<{ data: Volunteer }>("/volunteers", {
         full_name: String(form.get("full_name") || ""),
         phone: String(form.get("phone") || ""),
-        email: String(form.get("email") || "") || null,
+        email: email || null,
         skills: String(form.get("skills") || "")
           .split(",")
           .map((s) => s.trim())
@@ -49,7 +62,7 @@ export default function VolunteersPage() {
         max_tasks: Number(form.get("max_tasks") || 2),
         is_active: Boolean(form.get("is_active")),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       await loadVolunteers();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Failed to create volunteer");

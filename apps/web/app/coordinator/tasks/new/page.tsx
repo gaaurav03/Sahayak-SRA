@@ -2,10 +2,11 @@ import TaskCreateClient from "./TaskCreateClient";
 
 export const dynamic = "force-dynamic";
 
-export default function CreateTaskPage({
+export default async function CreateTaskPage({
   searchParams,
 }: {
-  searchParams: { report_id?: string };
+  searchParams: Promise<{ report_id?: string }>;
 }) {
-  return <TaskCreateClient reportId={searchParams.report_id ?? ""} />;
+  const params = await searchParams;
+  return <TaskCreateClient reportId={params.report_id ?? ""} />;
 }

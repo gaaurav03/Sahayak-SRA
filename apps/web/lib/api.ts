@@ -61,22 +61,103 @@ export type MatchResult = {
   distanceKm: number | null;
 };
 
+export type AnalyticsOverview = {
+  summary: {
+    openNeeds: number;
+    unresolvedCriticalNeeds: number;
+    activeTasks: number;
+    overdueTasks: number;
+    verifiedCompletionRate: number;
+    averageOpenUrgency: number;
+    volunteerUtilizationRate: number;
+    availableVolunteers: number;
+  };
+  taskStatus: Array<{
+    label: string;
+    value: number;
+  }>;
+  needStatus: Array<{
+    label: string;
+    value: number;
+  }>;
+  needsByCategory: Array<{
+    label: string;
+    value: number;
+  }>;
+  urgencyBands: Array<{
+    label: string;
+    value: number;
+  }>;
+  dailyFlow: Array<{
+    day: string;
+    needsCreated: number;
+    tasksCreated: number;
+    tasksCompleted: number;
+    tasksVerified: number;
+  }>;
+  volunteerCapacity: {
+    activeVolunteers: number;
+    inactiveVolunteers: number;
+    totalSlots: number;
+    usedSlots: number;
+  };
+  skillBalance: Array<{
+    skill: string;
+    supply: number;
+    demand: number;
+    gap: number;
+  }>;
+  topVolunteers: Array<{
+    id: string;
+    full_name: string;
+    total_deployments: number;
+    active_tasks: number;
+    max_tasks: number;
+    is_active: boolean;
+  }>;
+  recentTaskEvents: Array<{
+    id: string;
+    actor_label: string;
+    to_status: string;
+    created_at: string;
+    note: string | null;
+  }>;
+};
+
 function baseUrl() {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001/api/v1';
+  if (typeof window !== "undefined") {
+    return "/api/v1";
+  }
+
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api/v1";
 }
 
 export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${baseUrl()}${path}`, {
     ...init,
-    cache: 'no-store',
+    cache: "no-store",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
   });
 
   if (!res.ok) {
-    const message = await res.text();
+    const contentType = res.headers.get("content-type") ?? "";
+    let message = "";
+
+    if (contentType.includes("application/json")) {
+      const payload = (await res.json().catch(() => null)) as
+        | { error?: string; message?: string; details?: unknown }
+        | null;
+      message =
+        payload?.error ||
+        payload?.message ||
+        (typeof payload?.details === "string" ? payload.details : "");
+    } else {
+      message = await res.text();
+    }
+
     throw new Error(message || `Request failed: ${res.status}`);
   }
 
@@ -85,7 +166,7 @@ export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return apiGet<T>(path, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(body),
   });
 }

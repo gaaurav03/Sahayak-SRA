@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { ZodError } from 'zod';
+import { clerkMiddleware } from '@clerk/express';
 import { rankMatches } from './lib/matching.js';
 import {
   assignTaskSchema,
@@ -18,10 +19,18 @@ const app = express();
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+app.use(clerkMiddleware());
 
 function handleError(res: Response, error: unknown) {
   if (error instanceof ZodError) {
     return res.status(400).json({ error: 'Validation failed', details: error.flatten() });
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const maybeDbError = error as { code?: string; message?: string };
+    if (maybeDbError.code === '23505') {
+      return res.status(409).json({ error: maybeDbError.message ?? 'Duplicate record' });
+    }
   }
 
   const message = error instanceof Error ? error.message : 'Unexpected server error';
@@ -43,7 +52,70 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true, service: 'api', time: new Date().toISOString() });
 });
 
+import { clerkClient } from '@clerk/express';
+import { AuthenticatedRequest } from './lib/auth.js';
+
 const router = express.Router();
+
+router.post('/auth/sync', async (req: AuthenticatedRequest, res) => {
+  try {
+    // Manually extract and verify the Bearer token
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    }
+    const token = authHeader.slice(7);
+
+    // Verify the token with Clerk
+    let payload: { sub?: string };
+    try {
+      payload = await clerkClient.verifyToken(token);
+    } catch (e) {
+      console.error('[auth/sync] Token verification failed:', e);
+      return res.status(401).json({ error: 'Invalid or expired session token' });
+    }
+
+    const userId = payload.sub;
+    if (!userId) return res.status(401).json({ error: 'Cannot determine user from token' });
+
+    const role = req.body.role;
+    if (!role || !['coordinator', 'volunteer', 'reporter'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    // 1. Fetch user from Clerk
+    const clerkUser = await clerkClient.users.getUser(userId);
+    
+    // 2. Update Clerk Metadata
+    await clerkClient.users.updateUserMetadata(userId, {
+      publicMetadata: { role },
+    });
+
+    // 3. Try to upsert into Supabase users table (non-fatal if table doesn't exist yet)
+    try {
+      await supabase
+        .from('users')
+        .upsert(
+          {
+            clerk_id: userId,
+            full_name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || 'Unknown',
+            email: clerkUser.emailAddresses[0]?.emailAddress,
+            role,
+          },
+          { onConflict: 'clerk_id' }
+        )
+        .select('*')
+        .single();
+    } catch (dbErr) {
+      // Log but don't fail — the Clerk metadata update already succeeded
+      console.warn('[auth/sync] Supabase upsert failed (table may not exist yet):', dbErr);
+    }
+
+    return res.status(200).json({ ok: true, role });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
 
 router.get('/needs', async (req, res) => {
   try {
@@ -132,19 +204,58 @@ router.get('/volunteers', async (_req, res) => {
 router.post('/volunteers', async (req, res) => {
   try {
     const payload = createVolunteerSchema.parse(req.body);
+    const normalizedEmail = payload.email?.trim().toLowerCase() || null;
+
+    if (normalizedEmail) {
+      const { data: existingVolunteer, error: existingVolunteerError } = await supabase
+        .from('volunteers')
+        .select('id, full_name, email')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
+
+      if (existingVolunteerError) throw existingVolunteerError;
+      if (existingVolunteer) {
+        return res.status(409).json({
+          error: `A volunteer with email ${normalizedEmail} already exists.`,
+        });
+      }
+    }
 
     const { data, error } = await supabase
       .from('volunteers')
       .insert({
         ...payload,
+        email: normalizedEmail,
         active_tasks: 0,
         total_deployments: 0,
       })
       .select('*')
       .single();
 
-    if (error) throw new Error(error.message);
+    if (error) throw error;
     return res.status(201).json({ data });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.get('/tasks', async (req, res) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+
+    let query = supabase
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+
+    return res.status(200).json({ data: data ?? [] });
   } catch (error) {
     return handleError(res, error);
   }

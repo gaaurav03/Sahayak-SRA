@@ -1,8 +1,30 @@
--- Sahayak MVP schema (single-org demo)
+-- Sahayak MVP schema (single-org demo -> multi-org)
 create extension if not exists pgcrypto;
+
+create table if not exists organizations (
+  id uuid primary key default gen_random_uuid(),
+  name varchar(200) not null,
+  slug varchar(100) unique not null,
+  type varchar(50) default 'ngo',
+  district varchar(100),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  clerk_id varchar(200) unique not null,
+  org_id uuid references organizations(id),
+  full_name varchar(200) not null,
+  email varchar(200),
+  phone varchar(30),
+  role varchar(20) not null, -- 'coordinator', 'volunteer', 'reporter'
+  created_at timestamptz not null default now()
+);
 
 create table if not exists needs_report (
   id uuid primary key default gen_random_uuid(),
+  org_id uuid references organizations(id),
+  submitted_by uuid references users(id),
   title varchar(300) not null,
   description text default '',
   category varchar(50) not null,
@@ -13,11 +35,13 @@ create table if not exists needs_report (
   lng double precision,
   urgency_score numeric(4,2) not null,
   status varchar(30) not null default 'open',
+  image_urls text[] default '{}',
   created_at timestamptz not null default now()
 );
 
 create table if not exists volunteers (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(id),
   full_name varchar(200) not null,
   phone varchar(30) not null,
   email varchar(200) unique,
@@ -35,6 +59,8 @@ create table if not exists volunteers (
 
 create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
+  org_id uuid references organizations(id),
+  created_by uuid references users(id),
   report_id uuid not null references needs_report(id),
   title varchar(300) not null,
   description text default '',
@@ -48,6 +74,7 @@ create table if not exists tasks (
   status varchar(30) not null default 'open',
   assigned_to uuid references volunteers(id),
   completion_note text,
+  completion_image_url text,
   created_at timestamptz not null default now(),
   completed_at timestamptz
 );
