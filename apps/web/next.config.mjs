@@ -33,12 +33,15 @@ const nextConfig = {
     ];
   },
   async rewrites() {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001/api/v1";
+    const cleanApiBaseUrl = apiBaseUrl.endsWith('/') ? apiBaseUrl.slice(0, -1) : apiBaseUrl;
+    
     return [
       {
         // Proxy all API calls to Express EXCEPT the auth/sync route
         // which is handled natively by Next.js server-side
         source: "/api/v1/:path((?!auth).*)",
-        destination: "http://localhost:3001/api/v1/:path*",
+        destination: `${cleanApiBaseUrl}/:path*`,
       },
     ];
   },
