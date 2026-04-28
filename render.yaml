@@ -3,7 +3,7 @@ services:
     name: sahayak-api
     env: node
     plan: free
-    buildCommand: pnpm install && pnpm run build --filter @sahayak/api
+    buildCommand: pnpm install && pnpm --filter @sahayak/api... build
     startCommand: pnpm --filter @sahayak/api start
     envVars:
       - key: NODE_VERSION
