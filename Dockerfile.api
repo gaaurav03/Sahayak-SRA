@@ -1,0 +1,20 @@
+FROM node:20-slim AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+WORKDIR /app
+
+FROM base AS build
+COPY . .
+# Install dependencies
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# Build the API
+RUN pnpm run build --filter @sahayak/api
+# Deploy only the API and its production dependencies to a separate folder
+RUN pnpm deploy --filter @sahayak/api --prod /prod/api
+
+FROM base AS api
+COPY --from=build /prod/api /app
+WORKDIR /app
+EXPOSE 3001
+CMD [ "pnpm", "start" ]

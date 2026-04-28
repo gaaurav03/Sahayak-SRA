@@ -1,0 +1,22 @@
+FROM node:20-slim AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+WORKDIR /app
+
+FROM base AS build
+COPY . .
+# Install dependencies
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# Provide a dummy API URL for Next.js build phase if required
+ENV NEXT_PUBLIC_API_BASE_URL="http://localhost:3001/api/v1"
+# Build the Web app
+RUN pnpm run build --filter @sahayak/web
+# Deploy only the Web app and its production dependencies
+RUN pnpm deploy --filter @sahayak/web --prod /prod/web
+
+FROM base AS web
+COPY --from=build /prod/web /app
+WORKDIR /app
+EXPOSE 3000
+CMD [ "pnpm", "start" ]
