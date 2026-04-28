@@ -6,6 +6,10 @@ services:
     buildCommand: pnpm install && pnpm run build --filter @sahayak/api
     startCommand: pnpm --filter @sahayak/api start
     envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: PNPM_VERSION
+        value: "9"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
