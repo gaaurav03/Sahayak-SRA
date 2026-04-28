@@ -25,6 +25,15 @@ Inspired by the professional and high-contrast design of **NGO Darpan**, Sahayak
 
 ---
 
+## 🌐 DashBoard
+<img width="2239" height="1106" alt="image" src="https://github.com/user-attachments/assets/3fe6b271-3a98-4fdb-8800-54a594614755" />
+<img width="2214" height="1112" alt="image" src="https://github.com/user-attachments/assets/5d31b025-58c2-4f9e-9d4e-830f72080be0" />
+<img width="2212" height="1110" alt="image" src="https://github.com/user-attachments/assets/0f797d8c-f8df-43a6-8967-7c4b668dc941" />
+<img width="2211" height="1105" alt="image" src="https://github.com/user-attachments/assets/a2c64f69-2810-410e-8c36-7c372c8584da" />
+
+
+---
+
 ## ✨ Features
 
 ### 🏛️ For Coordinators
