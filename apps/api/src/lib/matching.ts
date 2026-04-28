@@ -127,3 +127,56 @@ export function rankMatches(task: TaskRow, volunteers: VolunteerRow[]) {
     .sort((a, b) => b.totalScore - a.totalScore)
     .slice(0, 3);
 }
+
+export function rankTasksForVolunteer(volunteer: VolunteerRow, tasks: TaskRow[]) {
+  const volunteerInput = toMatchVolunteer(volunteer);
+
+  return tasks
+    .map((task) => {
+      const hasTaskCoords = hasCoordinates(task.lat, task.lng);
+      const hasVolunteerCoords = hasCoordinates(volunteer.lat, volunteer.lng);
+
+      const skill = jaccardSimilarity(volunteer.skills ?? [], task.required_skills ?? []);
+      const avail = availabilityScore((volunteer.availability ?? {}) as Availability, new Date(task.deadline));
+      const load = workloadScore({ activeTasks: volunteer.active_tasks, maxTasks: volunteer.max_tasks });
+      const experience = Math.min(1, Math.max(0, volunteer.total_deployments) / 20);
+
+      let proximity = 0.5;
+      let distanceKm = Number.NaN;
+      let eligible = true;
+
+      if (hasTaskCoords && hasVolunteerCoords) {
+        const taskInput = toMatchTask(task);
+        const eligibility = isEligible(volunteerInput, taskInput);
+        eligible = eligibility.ok;
+        distanceKm = eligibility.distanceKm;
+        const detailed = scoreVolunteer(volunteerInput, taskInput);
+        proximity = detailed.proximityScore;
+      } else {
+        const sameText = normalizeLocation(volunteer.location_text) === normalizeLocation(task.location_text);
+        proximity = sameText ? 0.8 : 0.5;
+        eligible = avail > 0;
+      }
+
+      const total = skill * 0.4 + proximity * 0.25 + avail * 0.15 + load * 0.1 + experience * 0.1;
+
+      return {
+        task: {
+          id: task.id,
+          required_skills: task.required_skills ?? [],
+          location_text: task.location_text,
+          deadline: task.deadline,
+        },
+        skillScore: Number(skill.toFixed(3)),
+        proximityScore: Number(proximity.toFixed(3)),
+        availScore: Number(avail.toFixed(3)),
+        workloadScore: Number(load.toFixed(3)),
+        experienceScore: Number(experience.toFixed(3)),
+        totalScore: Number(total.toFixed(3)),
+        distanceKm: Number.isNaN(distanceKm) ? null : Number(distanceKm.toFixed(3)),
+        eligible,
+      };
+    })
+    .filter((item) => item.eligible)
+    .sort((a, b) => b.totalScore - a.totalScore);
+}

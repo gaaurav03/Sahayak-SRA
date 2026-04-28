@@ -3,6 +3,7 @@
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { isCoordinatorAdminEmail } from "../../lib/admin";
 
 type UserRole = "coordinator" | "volunteer" | "reporter";
 
@@ -11,19 +12,27 @@ export default function OnboardingPage() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectionError, setSelectionError] = useState("");
+  const email = user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? null;
+  const isCoordinatorAdmin = isCoordinatorAdminEmail(email);
 
   useEffect(() => {
     if (isLoaded && user?.publicMetadata?.role) {
-      // User already has a role, redirect to their dashboard
       const role = user.publicMetadata.role as string;
-      if (role === "coordinator") router.push("/coordinator/needs");
+      if (role === "coordinator" && isCoordinatorAdmin) router.push("/coordinator/needs");
       else if (role === "volunteer") router.push("/volunteer/tasks");
       else if (role === "reporter") router.push("/reporter/my-reports");
     }
-  }, [isLoaded, user, router]);
+  }, [isCoordinatorAdmin, isLoaded, user, router]);
 
   const selectRole = async (role: UserRole) => {
+    if (role === "coordinator" && !isCoordinatorAdmin) {
+      setSelectionError("Only the configured admin account can use the coordinator role.");
+      return;
+    }
+
     setIsSubmitting(true);
+    setSelectionError("");
     try {
       const token = await getToken();
       if (!token) {
@@ -53,11 +62,12 @@ export default function OnboardingPage() {
             : typeof errorData?.message === "string"
               ? errorData.message
               : res.statusText || `Request failed with status ${res.status}`;
-        console.error("Failed to set role", message);
+        setSelectionError(message);
         setIsSubmitting(false);
       }
     } catch (error) {
       console.error(error);
+      setSelectionError(error instanceof Error ? error.message : "Failed to set role");
       setIsSubmitting(false);
     }
   };
@@ -70,12 +80,26 @@ export default function OnboardingPage() {
     <div className="max-w-2xl mx-auto mt-12 p-6 bg-white rounded-2xl shadow-sm border border-gray-100">
       <h1 className="text-3xl font-display font-bold text-slate-800 mb-2">Welcome to Sahayak</h1>
       <p className="text-slate-600 mb-8">How would you like to use the platform?</p>
+      {!isCoordinatorAdmin ? (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Coordinator access is reserved for the single admin account: `gaurav21687@gmail.com`.
+        </div>
+      ) : null}
+      {selectionError ? (
+        <div className="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {selectionError}
+        </div>
+      ) : null}
 
       <div className="grid md:grid-cols-3 gap-6">
         {/* Coordinator */}
         <div 
           onClick={() => selectRole("coordinator")}
-          className="p-6 border border-gray-200 rounded-xl cursor-pointer hover:border-purple-500 hover:shadow-md transition-all group"
+          className={`p-6 border border-gray-200 rounded-xl transition-all group ${
+            isCoordinatorAdmin
+              ? "cursor-pointer hover:border-purple-500 hover:shadow-md"
+              : "cursor-not-allowed opacity-55 bg-slate-50"
+          }`}
         >
           <div className="h-12 w-12 bg-purple-100 text-purple-700 rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>

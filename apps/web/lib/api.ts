@@ -6,13 +6,29 @@ export type Need = {
   severity_self: string;
   affected_count: number;
   location_text: string;
+  lat: number | null;
+  lng: number | null;
+  image_urls?: string[];
+  client_captured_at?: string | null;
   urgency_score: number;
+  urgency_confidence?: number | null;
+  urgency_reasons?: Array<{ label: string; points: number }>;
+  urgency_override_score?: number | null;
+  urgency_override_note?: string | null;
+  urgency_override_by?: string | null;
+  urgency_override_at?: string | null;
+  dynamic_components?: { hoursSinceCreated: number; clusterCount: number };
   status: string;
+  reporter_clerk_id: string | null;
+  rejection_note: string | null;
+  approved_at?: string | null;
+  rejected_at?: string | null;
   created_at: string;
 };
 
 export type Volunteer = {
   id: string;
+  clerk_id: string | null;
   full_name: string;
   phone: string;
   email: string | null;
@@ -21,8 +37,21 @@ export type Volunteer = {
   availability: Record<string, string[]>;
   max_tasks: number;
   active_tasks: number;
+  approval_status: "pending" | "approved" | "rejected";
+  rejection_note: string | null;
   is_active: boolean;
   total_deployments: number;
+  created_at: string;
+};
+
+export type UserProfile = {
+  id: string;
+  clerk_id: string;
+  org_id: string | null;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  role: "coordinator" | "volunteer" | "reporter";
   created_at: string;
 };
 
@@ -36,10 +65,16 @@ export type Task = {
   deadline: string;
   location_text: string;
   status: string;
+  approval_status?: "pending" | "approved" | "rejected";
+  rejection_note?: string | null;
+  reporter_clerk_id?: string | null;
   assigned_to: string | null;
   completion_note: string | null;
   created_at: string;
   completed_at: string | null;
+  participant_status?: "assigned" | "completed";
+  participant_completion_note?: string | null;
+  participant_completed_at?: string | null;
 };
 
 export type MatchResult = {
@@ -124,11 +159,43 @@ export type AnalyticsOverview = {
   }>;
 };
 
+export type VolunteerRequest = {
+  id: string;
+  volunteer_id: string;
+  need_id: string | null;
+  task_id: string | null;
+  status: "pending" | "approved" | "rejected";
+  note: string | null;
+  coordinator_note: string | null;
+  decided_at: string | null;
+  created_at: string;
+};
+
+export type TaskRecommendation = {
+  task: Task & { need_title?: string | null };
+  skillScore: number;
+  proximityScore: number;
+  availScore: number;
+  workloadScore: number;
+  experienceScore: number;
+  totalScore: number;
+  distanceKm: number | null;
+};
+
+export type NeedTimelineEntry = {
+  type: "created" | "approved" | "task_created" | "assigned" | "completed" | "verified";
+  title: string;
+  timestamp: string | null;
+  actor_label: string | null;
+  note: string | null;
+  task_id: string | null;
+  task_title: string | null;
+};
+
 function baseUrl() {
   if (typeof window !== "undefined") {
     return "/api/v1";
   }
-
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api/v1";
 }
 

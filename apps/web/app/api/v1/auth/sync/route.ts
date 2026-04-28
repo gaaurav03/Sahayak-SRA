@@ -1,5 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { isCoordinatorAdminEmail } from "@/lib/admin";
 
 const VALID_ROLES = ["coordinator", "volunteer", "reporter"] as const;
 type Role = (typeof VALID_ROLES)[number];
@@ -21,6 +22,15 @@ export async function POST(request: Request) {
     }
 
     const client = await clerkClient();
+    const clerkUser = await client.users.getUser(userId);
+    const primaryEmail = clerkUser.emailAddresses[0]?.emailAddress ?? null;
+
+    if (role === "coordinator" && !isCoordinatorAdminEmail(primaryEmail)) {
+      return NextResponse.json(
+        { error: "Only the configured admin account can use the coordinator role." },
+        { status: 403 }
+      );
+    }
 
     // 1. Update Clerk public metadata with the role
     await client.users.updateUserMetadata(userId, {
@@ -34,8 +44,6 @@ export async function POST(request: Request) {
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
       );
-
-      const clerkUser = await client.users.getUser(userId);
 
       await supabase.from("users").upsert(
         {
