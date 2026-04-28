@@ -2,6 +2,7 @@ services:
   - type: web
     name: sahayak-api
     env: node
+    plan: free
     buildCommand: pnpm install && pnpm run build --filter @sahayak/api
     startCommand: pnpm --filter @sahayak/api start
     envVars:
