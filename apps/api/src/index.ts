@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { ZodError } from 'zod';
+import { verifyToken } from '@clerk/backend';
 import { clerkMiddleware } from '@clerk/express';
 import { rankMatches } from './lib/matching.js';
 import {
@@ -48,6 +49,14 @@ async function addTaskEvent(params: {
   if (error) throw new Error(error.message);
 }
 
+function dayKey(dateValue: string) {
+  return new Date(dateValue).toISOString().slice(0, 10);
+}
+
+function round(value: number, digits = 1) {
+  return Number(value.toFixed(digits));
+}
+
 app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true, service: 'api', time: new Date().toISOString() });
 });
@@ -69,7 +78,9 @@ router.post('/auth/sync', async (req: AuthenticatedRequest, res) => {
     // Verify the token with Clerk
     let payload: { sub?: string };
     try {
-      payload = await clerkClient.verifyToken(token);
+      payload = await verifyToken(token, {
+        secretKey: process.env.CLERK_SECRET_KEY,
+      });
     } catch (e) {
       console.error('[auth/sync] Token verification failed:', e);
       return res.status(401).json({ error: 'Invalid or expired session token' });
@@ -201,6 +212,231 @@ router.get('/volunteers', async (_req, res) => {
   }
 });
 
+router.get('/analytics/overview', async (_req, res) => {
+  try {
+    const [needsResult, tasksResult, volunteersResult, eventsResult] = await Promise.all([
+      supabase
+        .from('needs_report')
+        .select('id, category, status, urgency_score, created_at'),
+      supabase
+        .from('tasks')
+        .select('id, title, status, required_skills, created_at, completed_at, deadline, assigned_to'),
+      supabase
+        .from('volunteers')
+        .select('id, full_name, is_active, active_tasks, max_tasks, total_deployments, skills, created_at'),
+      supabase
+        .from('task_events')
+        .select('id, actor_label, to_status, created_at, note')
+        .order('created_at', { ascending: false }),
+    ]);
+
+    if (needsResult.error) throw needsResult.error;
+    if (tasksResult.error) throw tasksResult.error;
+    if (volunteersResult.error) throw volunteersResult.error;
+    if (eventsResult.error) throw eventsResult.error;
+
+    const needs = needsResult.data ?? [];
+    const tasks = tasksResult.data ?? [];
+    const volunteers = volunteersResult.data ?? [];
+    const taskEvents = eventsResult.data ?? [];
+    const now = new Date();
+
+    const taskStatusOrder = ['open', 'assigned', 'in_progress', 'completed', 'verified'];
+    const needStatusOrder = ['open', 'task_created', 'resolved'];
+    const categoryOrder = ['water', 'health', 'food', 'shelter', 'education', 'other'];
+
+    const taskStatusCounts = new Map(taskStatusOrder.map((status) => [status, 0]));
+    const needStatusCounts = new Map(needStatusOrder.map((status) => [status, 0]));
+    const categoryCounts = new Map(categoryOrder.map((category) => [category, 0]));
+    const urgencyBands = new Map([
+      ['Low', 0],
+      ['Moderate', 0],
+      ['High', 0],
+      ['Critical', 0],
+    ]);
+
+    for (const need of needs) {
+      needStatusCounts.set(need.status, (needStatusCounts.get(need.status) ?? 0) + 1);
+      categoryCounts.set(need.category, (categoryCounts.get(need.category) ?? 0) + 1);
+
+      const urgency = Number(need.urgency_score ?? 0);
+      if (urgency >= 7) urgencyBands.set('Critical', (urgencyBands.get('Critical') ?? 0) + 1);
+      else if (urgency >= 4) urgencyBands.set('High', (urgencyBands.get('High') ?? 0) + 1);
+      else if (urgency >= 2) urgencyBands.set('Moderate', (urgencyBands.get('Moderate') ?? 0) + 1);
+      else urgencyBands.set('Low', (urgencyBands.get('Low') ?? 0) + 1);
+    }
+
+    for (const task of tasks) {
+      taskStatusCounts.set(task.status, (taskStatusCounts.get(task.status) ?? 0) + 1);
+    }
+
+    const openNeeds = needs.filter((need) => need.status === 'open');
+    const unresolvedCriticalNeeds = needs.filter(
+      (need) => need.status !== 'resolved' && Number(need.urgency_score ?? 0) >= 7
+    ).length;
+    const activeTasks = tasks.filter((task) => ['open', 'assigned', 'in_progress'].includes(task.status)).length;
+    const overdueTasks = tasks.filter(
+      (task) =>
+        ['open', 'assigned', 'in_progress'].includes(task.status) &&
+        new Date(task.deadline).getTime() < now.getTime()
+    ).length;
+    const verifiedTasks = tasks.filter((task) => task.status === 'verified').length;
+    const verifiedCompletionRate = tasks.length === 0 ? 0 : round((verifiedTasks / tasks.length) * 100);
+    const averageOpenUrgency =
+      openNeeds.length === 0
+        ? 0
+        : round(
+            openNeeds.reduce((sum, need) => sum + Number(need.urgency_score ?? 0), 0) / openNeeds.length,
+            2
+          );
+
+    const totalSlots = volunteers.reduce((sum, volunteer) => sum + volunteer.max_tasks, 0);
+    const usedSlots = volunteers.reduce((sum, volunteer) => sum + volunteer.active_tasks, 0);
+    const activeVolunteers = volunteers.filter((volunteer) => volunteer.is_active).length;
+    const inactiveVolunteers = volunteers.length - activeVolunteers;
+    const availableVolunteers = volunteers.filter(
+      (volunteer) => volunteer.is_active && volunteer.active_tasks < volunteer.max_tasks
+    ).length;
+    const volunteerUtilizationRate = totalSlots === 0 ? 0 : round((usedSlots / totalSlots) * 100);
+
+    const days = 14;
+    const dailyFlowMap = new Map<string, { day: string; needsCreated: number; tasksCreated: number; tasksCompleted: number; tasksVerified: number }>();
+    for (let offset = days - 1; offset >= 0; offset -= 1) {
+      const day = new Date(now);
+      day.setUTCHours(0, 0, 0, 0);
+      day.setUTCDate(day.getUTCDate() - offset);
+      const key = day.toISOString().slice(0, 10);
+      dailyFlowMap.set(key, {
+        day: key,
+        needsCreated: 0,
+        tasksCreated: 0,
+        tasksCompleted: 0,
+        tasksVerified: 0,
+      });
+    }
+
+    for (const need of needs) {
+      const bucket = dailyFlowMap.get(dayKey(need.created_at));
+      if (bucket) bucket.needsCreated += 1;
+    }
+
+    for (const task of tasks) {
+      const createdBucket = dailyFlowMap.get(dayKey(task.created_at));
+      if (createdBucket) createdBucket.tasksCreated += 1;
+
+      if (task.completed_at) {
+        const completedBucket = dailyFlowMap.get(dayKey(task.completed_at));
+        if (completedBucket) completedBucket.tasksCompleted += 1;
+      }
+    }
+
+    for (const event of taskEvents) {
+      if (event.to_status !== 'verified') continue;
+      const verifiedBucket = dailyFlowMap.get(dayKey(event.created_at));
+      if (verifiedBucket) verifiedBucket.tasksVerified += 1;
+    }
+
+    const skillSupply = new Map<string, number>();
+    const skillDemand = new Map<string, number>();
+
+    for (const volunteer of volunteers) {
+      if (!volunteer.is_active) continue;
+      for (const skill of volunteer.skills ?? []) {
+        const normalized = skill.trim().toLowerCase();
+        if (!normalized) continue;
+        skillSupply.set(normalized, (skillSupply.get(normalized) ?? 0) + 1);
+      }
+    }
+
+    for (const task of tasks) {
+      if (!['open', 'assigned', 'in_progress'].includes(task.status)) continue;
+      for (const skill of task.required_skills ?? []) {
+        const normalized = skill.trim().toLowerCase();
+        if (!normalized) continue;
+        skillDemand.set(normalized, (skillDemand.get(normalized) ?? 0) + 1);
+      }
+    }
+
+    const skillSet = new Set([...skillSupply.keys(), ...skillDemand.keys()]);
+    const skillBalance = [...skillSet]
+      .map((skill) => {
+        const supply = skillSupply.get(skill) ?? 0;
+        const demand = skillDemand.get(skill) ?? 0;
+        return {
+          skill,
+          supply,
+          demand,
+          gap: demand - supply,
+        };
+      })
+      .sort((a, b) => {
+        if (b.gap !== a.gap) return b.gap - a.gap;
+        if (b.demand !== a.demand) return b.demand - a.demand;
+        return a.skill.localeCompare(b.skill);
+      })
+      .slice(0, 8);
+
+    const topVolunteers = [...volunteers]
+      .sort((a, b) => {
+        if (b.total_deployments !== a.total_deployments) return b.total_deployments - a.total_deployments;
+        if (b.active_tasks !== a.active_tasks) return b.active_tasks - a.active_tasks;
+        return a.full_name.localeCompare(b.full_name);
+      })
+      .slice(0, 5)
+      .map((volunteer) => ({
+        id: volunteer.id,
+        full_name: volunteer.full_name,
+        total_deployments: volunteer.total_deployments,
+        active_tasks: volunteer.active_tasks,
+        max_tasks: volunteer.max_tasks,
+        is_active: volunteer.is_active,
+      }));
+
+    return res.status(200).json({
+      data: {
+        summary: {
+          openNeeds: openNeeds.length,
+          unresolvedCriticalNeeds,
+          activeTasks,
+          overdueTasks,
+          verifiedCompletionRate,
+          averageOpenUrgency,
+          volunteerUtilizationRate,
+          availableVolunteers,
+        },
+        taskStatus: taskStatusOrder.map((status) => ({
+          label: status.replace('_', ' '),
+          value: taskStatusCounts.get(status) ?? 0,
+        })),
+        needStatus: needStatusOrder.map((status) => ({
+          label: status.replace('_', ' '),
+          value: needStatusCounts.get(status) ?? 0,
+        })),
+        needsByCategory: categoryOrder.map((category) => ({
+          label: category,
+          value: categoryCounts.get(category) ?? 0,
+        })),
+        urgencyBands: [...urgencyBands.entries()].map(([label, value]) => ({
+          label,
+          value,
+        })),
+        dailyFlow: [...dailyFlowMap.values()],
+        volunteerCapacity: {
+          activeVolunteers,
+          inactiveVolunteers,
+          totalSlots,
+          usedSlots,
+        },
+        skillBalance,
+        topVolunteers,
+        recentTaskEvents: taskEvents.slice(0, 6),
+      },
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.post('/volunteers', async (req, res) => {
   try {
     const payload = createVolunteerSchema.parse(req.body);
@@ -308,6 +544,20 @@ router.post('/tasks', async (req, res) => {
     const matches = rankMatches(data, volunteers ?? []);
 
     return res.status(201).json({ data, matches });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.get('/tasks', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return res.status(200).json({ data: data ?? [] });
   } catch (error) {
     return handleError(res, error);
   }
